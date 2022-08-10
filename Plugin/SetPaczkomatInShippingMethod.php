@@ -25,7 +25,28 @@ class SetPaczkomatInShippingMethod
 
     /**
      * @param  QuoteManagement  $subject
-     * @param  bool  $result
+     * @param  \BlueMedia\BluePayment\Api\Data\ShippingMethodInterface[]  $result
+     * @param $cartId
+     *
+     * @return \BlueMedia\BluePayment\Api\Data\ShippingMethodInterface[]
+     */
+    public function afterGetShippingMethods(QuoteManagement $subject, array $result, $cartId): array
+    {
+        foreach ($result as $shippingMethod) {
+            // Wykonujemy mapowanie, tak aby po stronie APC obsłużyć paczkomat
+
+            if ($shippingMethod->getCarrierCode() === 'paczkomaty' && $shippingMethod->getMethodCode() === 'paczkomaty') {
+                $shippingMethod->setCarrierCode('inpostlocker');
+                $shippingMethod->setMethodCode('standard');
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param  QuoteManagement  $subject
+     * @param  callable  $proceed
      * @param  int  $cartId
      * @param  string  $carrierCode
      * @param  string  $methodCode
@@ -34,17 +55,25 @@ class SetPaczkomatInShippingMethod
      * @return bool
      * @throws NoSuchEntityException
      */
-    public function afterSetShippingMethod(
+    public function aroundSetShippingMethod(
         QuoteManagement $subject,
-        bool $result,
+        callable $proceed,
         $cartId,
         $carrierCode,
         $methodCode,
         ShippingMethodAdditionalInterface $additional = null
     ): bool {
-        $cart = $this->cartRepository->get($cartId);
+        // Wykonujemy odwrotne mapowanie
+        if ($carrierCode === 'inpostlocker' && $methodCode === 'standard') {
+            $carrierCode = 'paczkomaty';
+            $methodCode = 'paczkomaty';
+        }
 
+        $result = $proceed($cartId, $carrierCode, $methodCode, $additional);
+
+        // Wykonujemy dodatkową logikę związaną z nasza niestandardową metodą paczkomatów.
         if ($carrierCode === 'paczkomaty' && $methodCode == 'paczkomaty') {
+            $cart = $this->cartRepository->get($cartId);
             $cartExtensionAttributes = $cart->getExtensionAttributes();
             if (!$cartExtensionAttributes) {
                 $cartExtensionAttributes = $this->cartExtensionFactory->create();
@@ -56,7 +85,8 @@ class SetPaczkomatInShippingMethod
             $cart->setExtensionAttributes($cartExtensionAttributes);
         }
 
-        // TODO: Implement plugin method.
+        $this->cartRepository->save($cart);
+
         return $result;
     }
 }
